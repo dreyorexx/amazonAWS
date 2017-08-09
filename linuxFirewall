@@ -1,0 +1,412 @@
+import com.jcraft.jsch.Channel;
+import com.jcraft.jsch.ChannelExec;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.Session;
+import javafx.application.Application;
+import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.geometry.Insets;
+import javafx.scene.Group;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
+import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.Font;
+import javafx.stage.Stage;
+
+import java.util.Scanner;
+import java.io.FileReader;
+import java.util.ArrayList;
+import java.io.FileWriter;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
+
+public class FirewallTableController extends Application {
+	
+	private TableView<FirewallPort> table = new TableView<FirewallPort>();
+    private final ObservableList<FirewallPort> FirewallConfiguration =
+        getFirewallConfiguration();
+    final HBox hb = new HBox();
+   
+    public static void main(String[] args) {
+        launch(args);
+    }
+ 
+    @Override
+    public void start(Stage stage) {
+        Scene scene = new Scene(new Group());
+        stage.setTitle("Firewall Table Version Alpha");
+        stage.setWidth(650);
+        stage.setHeight(550);
+ 
+        final Label label = new Label("Firewall Table");
+        label.setFont(new Font("Arial", 20));
+ 
+        table.setEditable(true);
+        
+        TableColumn PortNumberCol = new TableColumn("Port Number");
+        PortNumberCol.setMinWidth(100);
+        PortNumberCol.setCellValueFactory(
+                new PropertyValueFactory<FirewallPort, Integer>("PortNumber"));
+        
+        TableColumn SourceIPCol = new TableColumn("Source IP");
+        SourceIPCol.setMinWidth(100);
+        SourceIPCol.setCellValueFactory(
+                new PropertyValueFactory<FirewallPort, String>("SourceIP"));
+ 
+        TableColumn DestinationIPCol = new TableColumn("Destination IP");
+        DestinationIPCol.setMinWidth(100);
+        DestinationIPCol.setCellValueFactory(
+                new PropertyValueFactory<FirewallPort, String>("DestinationIP"));
+        
+        TableColumn PortTypeCol = new TableColumn("Port Type");
+        PortTypeCol.setMinWidth(100);
+        PortTypeCol.setCellValueFactory(
+                new PropertyValueFactory<FirewallPort, String>("PortType"));
+
+        TableColumn PortStatusCol = new TableColumn("Port Status (Open/Close)");
+        PortStatusCol.setMinWidth(200);
+        PortStatusCol.setCellValueFactory(
+                new PropertyValueFactory<FirewallPort, String>("PortStatus"));
+ 
+        table.setItems(FirewallConfiguration);
+        table.getColumns().addAll(PortNumberCol, SourceIPCol, DestinationIPCol, PortTypeCol, PortStatusCol);
+ 
+        final TextField addPortNumber = new TextField();
+        addPortNumber.setMaxWidth(PortNumberCol.getPrefWidth());
+        addPortNumber.setPromptText("Port Number");
+        final TextField addSourceIP = new TextField();
+        addSourceIP.setMaxWidth(SourceIPCol.getPrefWidth());
+        addSourceIP.setPromptText("Source IP");
+        final TextField addDestinationIP = new TextField();
+        addDestinationIP.setMaxWidth(DestinationIPCol.getPrefWidth());
+        addDestinationIP.setPromptText("Destination IP");
+        final TextField addPortType = new TextField();
+        addPortType.setPromptText("Port Type");
+        addPortType.setMaxWidth(PortTypeCol.getPrefWidth());
+ 
+        final Button addButton = new Button("Add");
+        addButton.addEventHandler(MouseEvent.MOUSE_CLICKED,  (e) -> {
+        	//TODO check that the port number is an integer
+            ConfigureFirewall(Integer.parseInt(addPortNumber.getText()), addSourceIP.getText(), addDestinationIP.getText());
+            FirewallConfiguration.add(new FirewallPort(
+                    Integer.parseInt(addPortNumber.getText()),
+                    	  addSourceIP.getText(),
+                    	  addDestinationIP.getText(),
+                          addPortType.getText(),
+                          "Closed"));
+            addPortNumber.clear();
+            addPortType.clear();
+            addSourceIP.clear();
+            addDestinationIP.clear();
+            saveFirewallConfiguration();
+        });
+ 
+        final Button clearButton = new Button("Clear");
+        clearButton.addEventHandler(MouseEvent.MOUSE_CLICKED,  (e) -> {
+            FirewallConfiguration.clear();
+            flushIPTables();
+            saveFirewallConfiguration();
+        });
+        
+        final Button testButton = new Button("Test");
+        testButton.addEventHandler(MouseEvent.MOUSE_CLICKED,  (e) -> {
+            getServerIP();
+        });
+        
+        hb.getChildren().addAll(addPortNumber, addSourceIP, addDestinationIP, addPortType, addButton, clearButton, testButton);
+        hb.setSpacing(3);
+ 
+        final VBox vbox = new VBox();
+        vbox.setSpacing(5);
+        vbox.setPadding(new Insets(10, 0, 0, 10));
+        vbox.getChildren().addAll(label, table, hb);
+ 
+        ((Group) scene.getRoot()).getChildren().addAll(vbox);
+ 
+        stage.setScene(scene);
+        stage.show();
+    }
+ 
+    public static class FirewallPort {
+ 
+        private final SimpleStringProperty DestinationIP;
+        private final SimpleStringProperty SourceIP;
+        private final SimpleStringProperty PortType;
+        private final SimpleStringProperty PortStatus;
+        private final SimpleIntegerProperty PortNumber;
+ 
+        private FirewallPort(int PortNumber, String SourceIP, String DestinationIP, String PortType, String PortStatus) {
+            this.DestinationIP = new SimpleStringProperty(DestinationIP);
+            this.SourceIP = new SimpleStringProperty(SourceIP);
+            this.PortType = new SimpleStringProperty(PortType);
+            this.PortStatus = new SimpleStringProperty(PortStatus);
+            this.PortNumber = new SimpleIntegerProperty(PortNumber);
+        }
+        
+        public String getSourceIP() {
+            return this.SourceIP.get();
+        }
+        
+        public void setSourceIP(String SourceIP) {
+        	this.SourceIP.set(SourceIP);
+        }
+ 
+        public String getDestinationIP() {
+            return this.DestinationIP.get();
+        }
+ 
+        public void setDestinationIP(String DestinationIP) {
+        	this.DestinationIP.set(DestinationIP);
+        }
+ 
+        public String getPortType() {
+            return this.PortType.get();
+        }
+ 
+        public void setPortType(String PortType) {
+        	this.PortType.set(PortType);
+        }
+ 
+        public String getPortStatus() {
+            return this.PortStatus.get();
+        }
+ 
+        public void setPortStatus(String PortStatus) {
+        	this.PortStatus.set(PortStatus);
+        }
+        public int getPortNumber(){
+        	return this.PortNumber.get();
+        }
+        public void setPortNumber(int PortNumber){
+        	this.PortNumber.set(PortNumber);
+        }
+        @Override
+        public String toString(){
+        	return this.PortNumber.get() + ";" + this.SourceIP.get() + ";" + this.DestinationIP.get() + ";" + this.PortType.get() + ";" + this.PortStatus.get() + "\n";
+        }
+    }
+    public ObservableList <FirewallPort> getFirewallConfiguration(){
+    	//TODO sorts the Firewall Ports in order of port numbers for better view
+    	try{
+    		FileReader fr = new FileReader("filepath of the txt file containing the terminal codes");
+    		Scanner sc = new Scanner(fr);
+    		ArrayList<String> data = new ArrayList<String>();
+    		int PortNumber;
+    		String SourceIP;
+    		String DestinationIP;
+    		String PortType;
+    		String PortStatus;
+    		ObservableList<FirewallPort> FirewallConfiguration = FXCollections.observableArrayList();
+    		while(sc.hasNextLine()){
+    			data.add(sc.nextLine());
+    		}
+    		for(int i = 0; i < data.size(); i++){
+    			Scanner scanner = new Scanner(data.get(i));
+    			Scanner in = scanner.useDelimiter(";");
+    			PortNumber = Integer.parseInt(in.next());
+    			SourceIP = in.next();
+    			DestinationIP = in.next();
+    			PortType = in.next();
+    			PortStatus = in.next();
+    			FirewallConfiguration.add(new FirewallPort(PortNumber, SourceIP, DestinationIP, PortType, PortStatus));
+    			in.close();
+    			scanner.close();
+    		}	
+    		sc.close();
+    		return FirewallConfiguration;  	
+    		}
+    	catch(Exception e){
+    		e.printStackTrace();
+    		ObservableList<FirewallPort> FirewallConfiguration = FXCollections.observableArrayList(new FirewallPort(0, "error", "error", "error", "error"));
+    		return FirewallConfiguration;
+    	}
+    }
+    
+    public void saveFirewallConfiguration(){
+    	try{
+    		FileWriter fw = new FileWriter("insert filepath of the txt file containing the terminal codes here");
+    		String data = "";
+    		for(int i = 0; i < FirewallConfiguration.size(); i++){
+    			data += FirewallConfiguration.get(i).toString();
+    		}
+    		fw.write(data);
+    		fw.close();
+    	}
+    	catch(Exception e){
+    		e.printStackTrace();
+    	}
+    }
+    
+    public String getServerIP(){
+    	//returns IPv4 address only
+    	String command = "sudo ifconfig eth0|grep -Po 't addr:\\K[\\d.]+'";
+    	//AWS server endpoint
+    	String host="example.amazonaws.com";
+	    String user="ec2-user";
+	    //filepath to your AWS .pem file
+	    String privateKey = "example.pem";
+	    String ServerIP = "0.0.0.0";
+	    try{
+	    	
+	    	java.util.Properties config = new java.util.Properties(); 
+	    	config.put("StrictHostKeyChecking", "no");
+	    	JSch jsch = new JSch();
+	    	jsch.addIdentity(privateKey);
+	    	Session session=jsch.getSession(user, host, 22);
+	    	session.setConfig("StrictHostKeyChecking", "no");
+	    	session.connect();
+	    	System.out.println("Connected");
+	    	
+	    	Channel channel=session.openChannel("exec");
+	    	((ChannelExec)channel).setCommand(command);
+	        channel.setInputStream(null);
+	        ((ChannelExec)channel).setErrStream(System.err);
+	        
+	        InputStream in=channel.getInputStream();
+	        channel.connect();
+	        
+	        byte[] tmp=new byte[1024];
+	        
+	        while(true){
+	          while(in.available()>0){
+	            int i=in.read(tmp, 0, 1024);
+	            if(i<0)break;
+	            System.out.print(new String(tmp, 0, i));
+	            ServerIP = new String(tmp, 0, i);
+	          }
+	          if(channel.isClosed()){
+	        	System.out.println("exit-status: "+channel.getExitStatus());
+	            break;
+	          }
+	          try{Thread.sleep(1000);}catch(Exception ee){}
+	        }
+	        channel.disconnect();
+	        session.disconnect();
+	        return ServerIP;
+	    }catch(Exception e){
+	    	e.printStackTrace();
+	    	return ServerIP;
+	    }
+    }
+    
+    public void ConfigureFirewall(int PortNumber, String SourceIP, String DestinationIP){
+    	//TODO allow connections as well
+    	//TODO check if the command was successful, if not it will not add to the table
+    	Scanner sc = new Scanner(getServerIP());
+    	String serverIP = sc.next();
+    	String command = "";
+    	JSch jsch = new JSch();
+        String host="example.amazonaws.com";
+  	  	String user="ec2-user";
+  	  	String privateKey = "example.pem";
+        int port = 22;    
+        try{
+        	jsch.addIdentity(privateKey);
+        	Session session = jsch.getSession(user, host, port);
+        	session.setConfig("StrictHostKeyChecking", "no");
+
+        	session.connect();
+
+        	Channel channel = session.openChannel("shell");
+        	OutputStream ops = channel.getOutputStream();
+        	PrintStream ps = new PrintStream(ops, true);
+
+        	channel.connect();
+        	InputStream input = channel.getInputStream();
+        	
+        	if(SourceIP.equalsIgnoreCase(serverIP)){
+        		command = "sudo iptables -A OUTPUT -o eth0 -p tcp --destination-port " + PortNumber + " -s " + DestinationIP + " -j DROP";
+        	}
+        	else if(DestinationIP.equalsIgnoreCase(serverIP)){
+        		command = "sudo iptables -A INPUT -i eth0 -p tcp --destination-port " + PortNumber + " -s " + DestinationIP + " -j DROP";
+        	}
+        	else{
+        		System.out.println("Error");
+        		return;
+        	}
+        
+        	ps.println(command);
+        	ps.println("exit");
+        
+        	ps.close();
+
+        	printResult(input, channel);
+        	
+        	channel.disconnect();
+        	session.disconnect();
+        }
+        catch(Exception e){
+        	e.printStackTrace();
+        }
+    }
+    
+    private static void printResult(InputStream input, Channel channel) throws Exception{
+    	int SIZE = 1024;
+    	byte[] tmp = new byte[SIZE];
+    	while (true){
+    		while (input.available() > 0){
+    			int i = input.read(tmp, 0, SIZE);
+    			if(i < 0)
+    				break;
+    			System.out.print(new String(tmp, 0, i));
+    		}
+    		if(channel.isClosed()){
+    			System.out.println("exit-status: " + channel.getExitStatus());
+    			break;
+    		}
+    		try{
+    			Thread.sleep(300);
+    		}
+    		catch (Exception ee){
+    			ee.printStackTrace();
+    		}
+    	}
+    }
+    
+    public void flushIPTables(){
+    	//TODO check if the command was successful, if not it will not clear the table
+    	String command = "sudo iptables -F";
+    	JSch jsch = new JSch();
+        String host="example.amazonaws.com";
+  	  	String user="ec2-user";
+  	  	String privateKey = "example.pem";
+        int port = 22;    
+        try{
+        jsch.addIdentity(privateKey);
+        Session session = jsch.getSession(user, host, port);
+        session.setConfig("StrictHostKeyChecking", "no");
+
+        session.connect();
+
+        Channel channel = session.openChannel("shell");
+        OutputStream ops = channel.getOutputStream();
+        PrintStream ps = new PrintStream(ops, true);
+
+        channel.connect();
+        InputStream input = channel.getInputStream();
+        
+        ps.println(command);
+        ps.println("exit");
+        
+        ps.close();
+
+        printResult(input, channel);
+
+        channel.disconnect();
+        session.disconnect();
+        }
+        catch(Exception e){
+        	e.printStackTrace();
+        }
+    }
+}
